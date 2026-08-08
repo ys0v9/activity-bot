@@ -1,0 +1,1 @@
+"""Contest Radar application package."""
