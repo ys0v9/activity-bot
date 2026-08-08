@@ -49,7 +49,7 @@ def test_contest_id_uses_verified_str_no() -> None:
 
 
 def test_detail_url_is_canonicalized() -> None:
-    url = "/sub/view.php?Txt_bcode=030310001&unused=x&str_no=202608080001&int_gbn=1"
+    url = "view.php?Txt_bcode=030310001&unused=x&str_no=202608080001&int_gbn=1"
 
     assert canonical_detail_url(url) == (
         "https://www.contestkorea.com/sub/view.php?int_gbn=1&Txt_bcode=030310001&str_no=202608080001"

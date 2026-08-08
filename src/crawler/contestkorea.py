@@ -79,7 +79,9 @@ def contest_id_from_url(detail_url: str) -> str:
 
 def canonical_detail_url(detail_url: str) -> str:
     """Preserve the detail identity query parameters in a predictable order."""
-    parsed = urlsplit(urljoin(BASE_URL, detail_url))
+    # The live list uses relative `view.php?...` links from `/sub/list.php`.
+    # Resolve against that directory rather than the host root.
+    parsed = urlsplit(urljoin(f"{BASE_URL}{LIST_PATH}", detail_url))
     query = parse_qs(parsed.query)
     kept = {
         key: query[key][0]
