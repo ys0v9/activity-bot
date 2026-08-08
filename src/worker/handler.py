@@ -122,10 +122,9 @@ def _chunk_messages(header: str, entries: Iterable[str]) -> list[str]:
     current = header
     for entry in entries:
         candidate = f"{current}\n\n{entry}"
-        if len(candidate) > DISCORD_MESSAGE_LIMIT and current != header:
-            chunks.append(current)
-            current = entry
-        else:
-            current = candidate
+        while len(candidate) > DISCORD_MESSAGE_LIMIT:
+            chunks.append(candidate[:DISCORD_MESSAGE_LIMIT])
+            candidate = candidate[DISCORD_MESSAGE_LIMIT:]
+        current = candidate
     chunks.append(current)
     return chunks

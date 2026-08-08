@@ -35,3 +35,13 @@ def test_new_contests_are_split_within_discord_limit() -> None:
 
     assert len(messages) > 1
     assert all(len(message) <= 2000 for message in messages)
+
+
+def test_single_long_contest_entry_is_split_within_discord_limit() -> None:
+    long_contest = _contest(1)
+    long_contest = Contest(**{**long_contest.to_item(), "target": "가" * 4_000})
+
+    messages = format_discord_messages(DiscoveryResult(False, 1, [long_contest]))
+
+    assert len(messages) > 1
+    assert all(len(message) <= 2000 for message in messages)
