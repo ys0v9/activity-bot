@@ -21,6 +21,7 @@ def test_parse_contestkorea_list_html() -> None:
     assert items[0].status == "접수예정"
     assert items[0].organizer == "한국정보기술진흥원"
     assert items[0].detail_url.endswith("str_no=202608080001")
+    assert items[0].contest_id == "contestkorea:202608080001"
 
 
 def test_parse_contestkorea_detail_html() -> None:

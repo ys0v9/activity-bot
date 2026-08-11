@@ -59,6 +59,7 @@ def main() -> int:
         "http_request_count": client.metrics.request_count,
         "list_request_count": client.metrics.list_request_count,
         "detail_request_count": client.metrics.detail_request_count,
+        "list_page_count": crawler.metrics.list_page_count,
         "list_fetch_duration_ms": crawler.metrics.list_fetch_duration_ms,
         "detail_fetch_duration_ms": crawler.metrics.detail_fetch_duration_ms,
         "total_duration_ms": int((time.perf_counter() - started) * 1000),

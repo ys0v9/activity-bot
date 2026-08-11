@@ -34,6 +34,12 @@ def handler(event: dict[str, Any], context: Any) -> None:
     success = False
     result: DiscoveryResult | None = None
     error_type: str | None = None
+    list_candidate_count = 0
+    known_contest_count = 0
+    new_candidate_count = 0
+    skipped_detail_count = 0
+    dynamodb_lookup_duration_ms = 0
+    dynamodb_write_duration_ms = 0
 
     try:
         settings = WorkerSettings.from_env()
@@ -41,11 +47,32 @@ def handler(event: dict[str, Any], context: Any) -> None:
         contest_repository = ContestRepository(dynamodb.Table(settings.contest_table_name))
         state_repository = StateRepository(dynamodb.Table(settings.state_table_name))
 
-        crawled = crawler.crawl()
-        checked_at = datetime.now(timezone.utc).isoformat()
-        result = ContestDiscovery(contest_repository, state_repository).process(
-            event["discord_user_id"], crawled, checked_at
+        list_items = crawler.fetch_list_items()
+        list_candidate_count = len(list_items)
+        discovery = ContestDiscovery(contest_repository, state_repository)
+
+        lookup_started = time.perf_counter()
+        classification = discovery.classify_candidates(
+            event["discord_user_id"],
+            (item.contest_id for item in list_items),
         )
+        dynamodb_lookup_duration_ms = int((time.perf_counter() - lookup_started) * 1000)
+        known_contest_count = len(classification.known_contest_ids)
+        new_candidate_count = len(classification.new_contest_ids)
+        skipped_detail_count = known_contest_count
+
+        items_by_id = {item.contest_id: item for item in list_items}
+        crawled = [crawler.fetch_detail(items_by_id[contest_id]) for contest_id in classification.new_contest_ids]
+        checked_at = datetime.now(timezone.utc).isoformat()
+        write_started = time.perf_counter()
+        result = discovery.process_classified(
+            event["discord_user_id"],
+            classification,
+            crawled,
+            checked_at,
+            total_contest_count=list_candidate_count,
+        )
+        dynamodb_write_duration_ms = int((time.perf_counter() - write_started) * 1000)
         messages = format_discord_messages(result)
         DiscordClient().send_deferred_response(event["application_id"], event["interaction_token"], messages)
         success = True
@@ -72,10 +99,17 @@ def handler(event: dict[str, Any], context: Any) -> None:
             crawl_duration_ms=crawler.metrics.list_fetch_duration_ms + crawler.metrics.detail_fetch_duration_ms,
             list_fetch_duration_ms=crawler.metrics.list_fetch_duration_ms,
             detail_fetch_duration_ms=crawler.metrics.detail_fetch_duration_ms,
+            dynamodb_lookup_duration_ms=dynamodb_lookup_duration_ms,
+            dynamodb_write_duration_ms=dynamodb_write_duration_ms,
             http_request_count=http_client.metrics.request_count,
             list_request_count=http_client.metrics.list_request_count,
             detail_request_count=http_client.metrics.detail_request_count,
-            contest_count=result.total_contest_count if result else 0,
+            list_page_count=crawler.metrics.list_page_count,
+            list_candidate_count=list_candidate_count,
+            known_contest_count=known_contest_count,
+            new_candidate_count=new_candidate_count,
+            skipped_detail_count=skipped_detail_count,
+            contest_count=result.total_contest_count if result else list_candidate_count,
             new_contest_count=len(result.new_contests) if result else 0,
             dynamodb_read_count=(contest_repository.read_count if contest_repository else 0)
             + (state_repository.read_count if state_repository else 0),

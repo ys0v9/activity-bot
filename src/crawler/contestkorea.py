@@ -38,9 +38,15 @@ class ContestKoreaListItem:
     status: str | None
     detail_url: str
 
+    @property
+    def contest_id(self) -> str:
+        """Return the stable identity available directly from the list link."""
+        return contest_id_from_url(self.detail_url)
+
 
 @dataclass(slots=True)
 class CrawlMetrics:
+    list_page_count: int = 0
     list_fetch_duration_ms: int = 0
     detail_fetch_duration_ms: int = 0
     crawler_error_count: int = 0
@@ -111,7 +117,15 @@ class ContestKoreaCrawler:
         return self.http_client.metrics
 
     def crawl(self) -> list[Contest]:
-        """Fetch target list items then their public detail pages sequentially."""
+        """Fetch all details for local smoke-crawl compatibility.
+
+        The Worker uses the public list and detail methods separately so known
+        contests can skip their detail requests.
+        """
+        return [self.fetch_detail(item) for item in self.fetch_list_items()]
+
+    def fetch_list_items(self) -> list[ContestKoreaListItem]:
+        """Fetch and deduplicate current target items without loading details."""
         candidates: list[ContestKoreaListItem] = []
         empty_target_pages = 0
 
@@ -133,33 +147,33 @@ class ContestKoreaCrawler:
                 if empty_target_pages >= self.max_consecutive_empty_target_pages:
                     break
 
-        contests: list[Contest] = []
         seen_ids: set[str] = set()
+        deduplicated: list[ContestKoreaListItem] = []
         for item in candidates:
-            contest_id = contest_id_from_url(item.detail_url)
-            if contest_id in seen_ids:
+            if item.contest_id in seen_ids:
                 continue
-            seen_ids.add(contest_id)
-            try:
-                contests.append(self._fetch_detail(item))
-            except (HTTPError, ValueError) as exc:
-                self.metrics.crawler_error_count += 1
-                raise ContestKoreaCrawlError(f"Failed to fetch ContestKorea detail {contest_id}") from exc
-        return contests
+            seen_ids.add(item.contest_id)
+            deduplicated.append(item)
+        return deduplicated
 
     def _fetch_list_page(self, page: int) -> list[ContestKoreaListItem]:
         started = time.perf_counter()
+        self.metrics.list_page_count += 1
         try:
             response = self.http_client.get(self.list_url(page), request_type="list")
             return self.parse_list_html(response.text)
         finally:
             self.metrics.list_fetch_duration_ms += int((time.perf_counter() - started) * 1000)
 
-    def _fetch_detail(self, item: ContestKoreaListItem) -> Contest:
+    def fetch_detail(self, item: ContestKoreaListItem) -> Contest:
+        """Fetch one public detail page for a candidate not known in DynamoDB."""
         started = time.perf_counter()
         try:
             response = self.http_client.get(item.detail_url, request_type="detail")
             return self.parse_detail_html(response.text, item)
+        except (HTTPError, ValueError) as exc:
+            self.metrics.crawler_error_count += 1
+            raise ContestKoreaCrawlError(f"Failed to fetch ContestKorea detail {item.contest_id}") from exc
         finally:
             self.metrics.detail_fetch_duration_ms += int((time.perf_counter() - started) * 1000)
 
