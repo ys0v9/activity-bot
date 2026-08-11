@@ -25,13 +25,15 @@ class LambdaInvoker(Protocol):
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Lambda entry point."""
-    import boto3
+    """Lambda entry point.
 
-    return handle(event, context, lambda_client=boto3.client("lambda"))
+    Keep PING verification free of boto3 initialization: Discord expects this
+    response within three seconds, including a cold start.
+    """
+    return handle(event, context, lambda_client=None)
 
 
-def handle(event: dict[str, Any], context: Any, *, lambda_client: LambdaInvoker) -> dict[str, Any]:
+def handle(event: dict[str, Any], context: Any, *, lambda_client: LambdaInvoker | None) -> dict[str, Any]:
     request_id = getattr(context, "aws_request_id", "unknown")
     try:
         settings = InteractionSettings.from_env()
@@ -63,6 +65,10 @@ def handle(event: dict[str, Any], context: Any, *, lambda_client: LambdaInvoker)
             "interaction_token": payload["token"],
             "request_id": request_id,
         }
+        if lambda_client is None:
+            import boto3
+
+            lambda_client = boto3.client("lambda")
         lambda_client.invoke(
             FunctionName=settings.worker_function_name,
             InvocationType="Event",

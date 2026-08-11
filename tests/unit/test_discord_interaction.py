@@ -49,6 +49,17 @@ def test_discord_signature_validation() -> None:
     assert verify_discord_signature(signing_key.verify_key.encode().hex(), signature, timestamp, "{}") is False
 
 
+def test_valid_ping_needs_no_lambda_client(monkeypatch: object) -> None:
+    signing_key = SigningKey.generate()
+    configure(monkeypatch, signing_key.verify_key.encode().hex())
+    event = signed_event(signing_key, {"type": 1})
+
+    response = handle(event, Context(), lambda_client=None)
+
+    assert response["statusCode"] == 200
+    assert json.loads(response["body"]) == {"type": 1}
+
+
 def test_allowed_user_invokes_worker(monkeypatch: object) -> None:
     signing_key = SigningKey.generate()
     configure(monkeypatch, signing_key.verify_key.encode().hex())
