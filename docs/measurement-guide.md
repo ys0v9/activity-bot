@@ -1,6 +1,22 @@
 # CloudWatch 측정 가이드
 
-Worker Lambda는 실행마다 `event=contest_worker_completed`, `version=v1-contestkorea`의 구조화 로그를 한 줄 남긴다. 값은 실제 `time.perf_counter()`와 `HttpClient.get()` 호출 횟수로 계산한다. 예시 수치를 실제 운영 측정값처럼 취급하지 않는다.
+Worker Lambda는 실행마다 `event=contest_worker_completed`, `version=v1-contestkorea`의 구조화 로그를 한 줄 남긴다. 값은 실제 `time.perf_counter()`, `HttpClient.get()` 호출 횟수, DynamoDB repository 호출 구간으로 계산한다. 예시 수치를 실제 운영 측정값처럼 취급하지 않는다.
+
+## 반복 조회 상세 요청 생략 측정
+
+목록에서 `str_no` 기반 `contest_id`를 먼저 확인한 뒤, DynamoDB에 없는 후보만 상세 페이지를 요청한다. 다음 값으로 해당 동작을 검증한다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `list_page_count` | 실제 조회한 목록 페이지 수 |
+| `list_candidate_count` | 상태 필터와 중복 제거 후의 목록 후보 수 |
+| `known_contest_count` | DynamoDB에 이미 있던 후보 수 |
+| `new_candidate_count` | 상세 조회 대상으로 분류된 신규 후보 수 |
+| `skipped_detail_count` | 기존 공고라 상세 요청을 생략한 후보 수 |
+| `dynamodb_lookup_duration_ms` | State/Contest 존재 여부 확인에 실제 걸린 시간 |
+| `dynamodb_write_duration_ms` | last_seen 갱신·신규 저장·state 저장에 실제 걸린 시간 |
+
+정상적인 실행에서는 `list_candidate_count = known_contest_count + new_candidate_count`, `skipped_detail_count = known_contest_count`다. 최초 initialization은 모든 후보가 신규 후보가 될 수 있으므로 상세 요청이 발생한다. initialization 이후 신규가 없는 반복 조회에서는 `detail_request_count = 0`이어야 한다.
 
 ## CloudWatch Metrics에서 확인할 항목
 
@@ -70,6 +86,38 @@ fields @timestamp, @message
         avg(list_fetch_duration_ms) as avg_list_ms,
         avg(detail_fetch_duration_ms) as avg_detail_ms,
         pct(crawl_duration_ms, 95) as p95_crawl_ms
+```
+
+목록 후보 분류·상세 요청 생략·DynamoDB 단계 시간:
+
+```sql
+fields @timestamp, @message
+| filter @message like /contest_worker_completed/
+| parse @message /list_page_count\\?": (?<list_page_count>\d+)/
+| parse @message /list_candidate_count\\?": (?<list_candidate_count>\d+)/
+| parse @message /known_contest_count\\?": (?<known_contest_count>\d+)/
+| parse @message /new_candidate_count\\?": (?<new_candidate_count>\d+)/
+| parse @message /skipped_detail_count\\?": (?<skipped_detail_count>\d+)/
+| parse @message /dynamodb_lookup_duration_ms\\?": (?<dynamodb_lookup_duration_ms>\d+)/
+| parse @message /dynamodb_write_duration_ms\\?": (?<dynamodb_write_duration_ms>\d+)/
+| display @timestamp, list_page_count, list_candidate_count,
+          known_contest_count, new_candidate_count, skipped_detail_count,
+          dynamodb_lookup_duration_ms, dynamodb_write_duration_ms
+| sort @timestamp desc
+| limit 50
+```
+
+반복 조회에서 상세 요청 생략 여부만 확인:
+
+```sql
+fields @timestamp, @message
+| filter @message like /contest_worker_completed/
+| parse @message /detail_request_count\\?": (?<detail_request_count>\d+)/
+| parse @message /new_candidate_count\\?": (?<new_candidate_count>\d+)/
+| parse @message /skipped_detail_count\\?": (?<skipped_detail_count>\d+)/
+| display @timestamp, detail_request_count, new_candidate_count, skipped_detail_count
+| sort @timestamp desc
+| limit 50
 ```
 
 신규 공모전 수, 크롤러 오류 수, 성공/실패 건수:
