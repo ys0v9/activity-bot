@@ -1,0 +1,186 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Discord Contest Radar v1 - ContestKorea on-demand personal crawler
+
+Parameters:
+  AllowedDiscordUserId:
+    Type: String
+    Description: Discord user ID allowed to run /최신.
+  DiscordPublicKey:
+    Type: String
+    NoEcho: true
+    Description: Discord Application Public Key for Interaction signature verification.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    Description: CloudWatch log retention period.
+
+Resources:
+  ContestRadarHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+
+  ContestTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: contest_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: contest_id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+
+  StateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: discord_user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: discord_user_id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+
+  InteractionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-interaction
+      RetentionInDays: !Ref LogRetentionDays
+
+  WorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-worker
+      RetentionInDays: !Ref LogRetentionDays
+
+  InteractionFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteInteractionLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${InteractionLogGroup.Arn}:*"
+        - PolicyName: InvokeContestWorker
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ContestWorkerFunction.Arn
+
+  WorkerFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteWorkerLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${WorkerLogGroup.Arn}:*"
+        - PolicyName: AccessContestAndStateTables
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt ContestTable.Arn
+                  - !GetAtt StateTable.Arn
+
+  InteractionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-interaction
+      CodeUri: .
+      Handler: src.interaction.handler.handler
+      Runtime: python3.13
+      Architectures:
+        - arm64
+      Timeout: 10
+      MemorySize: 256
+      Role: !GetAtt InteractionFunctionRole.Arn
+      Environment:
+        Variables:
+          ALLOWED_DISCORD_USER_ID: !Ref AllowedDiscordUserId
+          DISCORD_PUBLIC_KEY: !Ref DiscordPublicKey
+          WORKER_FUNCTION_NAME: !Ref ContestWorkerFunction
+      LoggingConfig:
+        LogFormat: JSON
+        ApplicationLogLevel: INFO
+        SystemLogLevel: INFO
+        LogGroup: !Ref InteractionLogGroup
+      Events:
+        DiscordInteractions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ContestRadarHttpApi
+            Path: /interactions
+            Method: POST
+
+  ContestWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-worker
+      CodeUri: .
+      Handler: src.worker.handler.handler
+      Runtime: python3.13
+      Architectures:
+        - arm64
+      Timeout: 600
+      MemorySize: 1024
+      Role: !GetAtt WorkerFunctionRole.Arn
+      Environment:
+        Variables:
+          CONTEST_TABLE_NAME: !Ref ContestTable
+          STATE_TABLE_NAME: !Ref StateTable
+      LoggingConfig:
+        LogFormat: JSON
+        ApplicationLogLevel: INFO
+        SystemLogLevel: INFO
+        LogGroup: !Ref WorkerLogGroup
+
+Outputs:
+  InteractionEndpointUrl:
+    Description: Set this value as Discord Application's Interactions Endpoint URL.
+    Value: !Sub https://${ContestRadarHttpApi}.execute-api.${AWS::Region}.amazonaws.com/interactions
+  ContestTableName:
+    Value: !Ref ContestTable
+  StateTableName:
+    Value: !Ref StateTable
+  InteractionFunctionName:
+    Value: !Ref InteractionFunction
+  WorkerFunctionName:
+    Value: !Ref ContestWorkerFunction
