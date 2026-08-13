@@ -45,16 +45,17 @@ Contest Table의 기존 공고 존재 여부는 후보 ID를 중복 제거한 �
 
 ## 목록 페이지 크기 확장 측정
 
-ContestKorea 공개 목록에서 확인한 `displayrow=100`을 사용한다. 이 변경은 상태 필터, 정렬, 페이지네이션 탐색, `str_no` 기반 식별을 바꾸지 않고 **한 HTTP 응답에 포함되는 목록 수만** 늘린다. 따라서 비교할 때는 같은 수집 대상 범위에서 아래 값을 함께 본다.
+ContestKorea 공개 목록에서 확인한 `displayrow=1000`을 사용한다. 이 변경은 상태 필터, 정렬, 페이지네이션 탐색, `str_no` 기반 식별을 바꾸지 않고 **한 HTTP 응답에 포함되는 목록 수만** 늘린다. 따라서 비교할 때는 같은 수집 대상 범위에서 아래 값을 함께 본다.
 
 | 필드 | 의미 |
 | --- | --- |
 | `list_request_count` | 실제 `HttpClient.get(..., request_type="list")` 호출 수 |
 | `list_page_count` | crawler가 실제로 탐색한 목록 페이지 수 |
 | `list_fetch_duration_ms` | 모든 목록 HTTP 요청과 HTML parsing에 걸린 실제 시간 |
+| `list_request_duration_ms_total` | 각 목록 HTTP 요청 시간을 합한 값. 병렬 처리 시 경과 시간보다 클 수 있음 |
 | `list_candidate_count` | 상태 필터와 중복 제거 후 후보 공고 수 |
 
-공고 수와 상태는 실행 시점마다 달라질 수 있으므로, 서로 다른 실행의 절대 시간만으로 성능을 단정하지 않는다. `list_candidate_count`가 비슷한 실행끼리 `list_request_count`, `list_page_count`, `list_fetch_duration_ms`를 비교한다. `scripts/smoke_crawl.py`의 출력에도 위 목록 요청 수·페이지 수·목록 수집 시간이 포함된다.
+공고 수와 상태는 실행 시점마다 달라질 수 있으므로, 서로 다른 실행의 절대 시간만으로 성능을 단정하지 않는다. `list_candidate_count`가 비슷한 실행끼리 `list_request_count`, `list_page_count`, `list_fetch_duration_ms`, `list_request_duration_ms_total`을 비교한다. `scripts/smoke_crawl.py`의 출력에도 위 목록 요청 수·페이지 수·목록 수집 시간이 포함된다.
 
 ## 제한 병렬 목록 수집 측정
 
@@ -196,9 +197,10 @@ fields @timestamp, @message
 | parse @message /list_request_count\\?": (?<list_request_count>\d+)/
 | parse @message /list_page_count\\?": (?<list_page_count>\d+)/
 | parse @message /list_fetch_duration_ms\\?": (?<list_fetch_duration_ms>\d+)/
+| parse @message /list_request_duration_ms_total\\?": (?<list_request_duration_ms_total>\d+)/
 | parse @message /list_candidate_count\\?": (?<list_candidate_count>\d+)/
 | display @timestamp, list_candidate_count, list_request_count,
-          list_page_count, list_fetch_duration_ms
+          list_page_count, list_fetch_duration_ms, list_request_duration_ms_total
 | sort @timestamp desc
 | limit 50
 ```
