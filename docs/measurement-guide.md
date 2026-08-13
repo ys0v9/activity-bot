@@ -18,6 +18,19 @@ Worker Lambda는 실행마다 `event=contest_worker_completed`, `version=v1-cont
 
 정상적인 실행에서는 `list_candidate_count = known_contest_count + new_candidate_count`, `skipped_detail_count = known_contest_count`다. 최초 initialization은 모든 후보가 신규 후보가 될 수 있으므로 상세 요청이 발생한다. initialization 이후 신규가 없는 반복 조회에서는 `detail_request_count = 0`이어야 한다.
 
+## BatchGetItem 조회 측정
+
+Contest Table의 기존 공고 존재 여부는 후보 ID를 중복 제거한 뒤 최대 100개 단위로 `BatchGetItem`으로 조회한다. 현재 `GetItem`의 강한 일관성 정책은 `ConsistentRead=True`로 유지한다. BatchGetItem은 각 항목을 읽기 용량 기준으로 처리하므로, 이 변경의 목표는 읽기 용량 자체를 하나로 합치는 것이 아니라 Lambda와 DynamoDB 사이의 API 왕복 횟수를 줄이는 것이다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `dynamodb_read_count` | Contest 후보 ID와 State 조회를 포함한 논리적 읽기 항목 수 |
+| `dynamodb_batch_get_request_count` | 실제 BatchGetItem API 호출 수. 부분 응답 재시도도 포함 |
+| `dynamodb_unprocessed_key_retry_count` | `UnprocessedKeys`를 제한 재시도한 횟수 |
+| `dynamodb_lookup_duration_ms` | State 조회와 Contest BatchGetItem 후보 분류에 걸린 실제 시간 |
+
+정상적으로 부분 응답이 없으면 후보 N개의 Contest 조회는 `ceil(N / 100)`회 BatchGetItem으로 처리된다. `UnprocessedKeys`가 반환되면 제한된 exponential backoff 재시도를 하고, 재시도 한도를 넘겨도 남은 키가 있으면 Worker는 오류로 종료한다.
+
 ## CloudWatch Metrics에서 확인할 항목
 
 AWS Console → **CloudWatch** → **Metrics** → **Lambda** → **By Function Name**에서 Worker Function을 선택한다.
@@ -103,6 +116,21 @@ fields @timestamp, @message
 | display @timestamp, list_page_count, list_candidate_count,
           known_contest_count, new_candidate_count, skipped_detail_count,
           dynamodb_lookup_duration_ms, dynamodb_write_duration_ms
+| sort @timestamp desc
+| limit 50
+```
+
+BatchGetItem API 왕복 및 부분 응답 재시도:
+
+```sql
+fields @timestamp, @message
+| filter @message like /contest_worker_completed/
+| parse @message /list_candidate_count\\?": (?<list_candidate_count>\d+)/
+| parse @message /dynamodb_lookup_duration_ms\\?": (?<dynamodb_lookup_duration_ms>\d+)/
+| parse @message /dynamodb_batch_get_request_count\\?": (?<dynamodb_batch_get_request_count>\d+)/
+| parse @message /dynamodb_unprocessed_key_retry_count\\?": (?<dynamodb_unprocessed_key_retry_count>\d+)/
+| display @timestamp, list_candidate_count, dynamodb_batch_get_request_count,
+          dynamodb_unprocessed_key_retry_count, dynamodb_lookup_duration_ms
 | sort @timestamp desc
 | limit 50
 ```

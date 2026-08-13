@@ -113,6 +113,8 @@ def handler(event: dict[str, Any], context: Any) -> None:
             new_contest_count=len(result.new_contests) if result else 0,
             dynamodb_read_count=(contest_repository.read_count if contest_repository else 0)
             + (state_repository.read_count if state_repository else 0),
+            dynamodb_batch_get_request_count=contest_repository.batch_get_request_count if contest_repository else 0,
+            dynamodb_unprocessed_key_retry_count=contest_repository.unprocessed_key_retry_count if contest_repository else 0,
             dynamodb_write_count=(contest_repository.write_count if contest_repository else 0)
             + (state_repository.write_count if state_repository else 0),
             crawler_error_count=crawler.metrics.crawler_error_count,
