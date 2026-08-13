@@ -72,23 +72,30 @@ def test_first_request_saves_baseline_without_returning_new_contests() -> None:
     assert len(contest_table.items) == 2
 
 
-def test_existing_contest_is_not_returned_and_last_seen_is_updated() -> None:
+def test_existing_contest_is_not_returned_and_last_seen_stays_at_first_seen() -> None:
     contest_table = FakeTable("contest_id")
     state_table = FakeTable("discord_user_id")
-    service = ContestDiscovery(ContestRepository(contest_table), StateRepository(state_table))
+    contest_repository = ContestRepository(contest_table)
+    state_repository = StateRepository(state_table)
+    service = ContestDiscovery(contest_repository, state_repository)
     service.process("user-1", [contest()], "2026-08-09T00:00:00+00:00")
 
     result = service.process("user-1", [contest()], "2026-08-10T00:00:00+00:00")
 
     assert result.initialized is False
     assert result.new_contests == []
-    assert contest_table.items["contestkorea:1"]["last_seen_at"] == "2026-08-10T00:00:00+00:00"
+    assert contest_table.items["contestkorea:1"]["last_seen_at"] == "2026-08-09T00:00:00+00:00"
+    assert contest_repository.write_count == 1
+    assert state_repository.write_count == 2
+    assert state_table.items["user-1"]["last_checked_at"] == "2026-08-10T00:00:00+00:00"
 
 
 def test_only_unseen_contest_is_returned_after_initialization() -> None:
     contest_table = FakeTable("contest_id")
     state_table = FakeTable("discord_user_id")
-    service = ContestDiscovery(ContestRepository(contest_table), StateRepository(state_table))
+    contest_repository = ContestRepository(contest_table)
+    state_repository = StateRepository(state_table)
+    service = ContestDiscovery(contest_repository, state_repository)
     service.process("user-1", [contest("contestkorea:1")], "2026-08-09T00:00:00+00:00")
 
     result = service.process(
@@ -98,6 +105,10 @@ def test_only_unseen_contest_is_returned_after_initialization() -> None:
     )
 
     assert [item.contest_id for item in result.new_contests] == ["contestkorea:2"]
+    assert contest_repository.write_count == 2
+    assert contest_table.items["contestkorea:1"]["last_seen_at"] == "2026-08-09T00:00:00+00:00"
+    assert contest_table.items["contestkorea:2"]["last_seen_at"] == "2026-08-10T00:00:00+00:00"
+    assert state_repository.write_count == 2
 
 
 def test_duplicate_crawled_contests_are_saved_once() -> None:
