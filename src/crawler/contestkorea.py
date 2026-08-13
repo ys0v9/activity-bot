@@ -23,7 +23,10 @@ SOURCE = "contestkorea"
 BASE_URL = "https://www.contestkorea.com"
 LIST_PATH = "/sub/list.php"
 ALLOWED_STATUSES = frozenset({"접수중", "접수예정"})
-LIST_DISPLAY_ROWS = 100
+# ContestKorea's public endpoint accepts this verified page size.  Keeping the
+# existing bounded concurrency means this reduces pagination requests without
+# increasing the number of simultaneous requests to the source site.
+LIST_DISPLAY_ROWS = 1_000
 LIST_FETCH_PARALLELISM = 5
 MAX_CONSECUTIVE_EMPTY_TARGET_ITEMS = 36
 DATE_PATTERN = re.compile(r"(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})")

@@ -66,7 +66,7 @@ def test_list_url_uses_verified_page_size_and_preserves_contest_filter() -> None
     query = parse_qs(urlsplit(ContestKoreaCrawler.list_url(7)).query, keep_blank_values=True)
 
     assert query["displayrow"] == [str(LIST_DISPLAY_ROWS)]
-    assert query["displayrow"] == ["100"]
+    assert query["displayrow"] == ["1000"]
     assert query["page"] == ["7"]
     assert query["int_gbn"] == ["1"]
     assert query["Txt_sortkey"] == ["a.int_sort"]
