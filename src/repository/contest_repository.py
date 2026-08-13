@@ -16,7 +16,6 @@ class DynamoTable(Protocol):
 
     def put_item(self, **kwargs: Any) -> dict[str, Any]: ...
 
-    def update_item(self, **kwargs: Any) -> dict[str, Any]: ...
 
 
 class ContestRepository:
@@ -84,11 +83,3 @@ class ContestRepository:
     def save(self, contest: Contest) -> None:
         self.write_count += 1
         self._table.put_item(Item=contest.to_item())
-
-    def update_last_seen(self, contest_id: str, checked_at: str) -> None:
-        self.write_count += 1
-        self._table.update_item(
-            Key={"contest_id": contest_id},
-            UpdateExpression="SET last_seen_at = :checked_at",
-            ExpressionAttributeValues={":checked_at": checked_at},
-        )

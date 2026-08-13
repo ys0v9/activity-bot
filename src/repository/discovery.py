@@ -80,9 +80,6 @@ class ContestDiscovery:
         if set(new_ids) != set(classification.new_contest_ids):
             raise ValueError("Detailed contests must exactly match unseen list candidates")
 
-        for contest_id in classification.known_contest_ids:
-            self.contests.update_last_seen(contest_id, checked_at)
-
         observed_new: list[Contest] = []
         for contest in deduplicated_new:
             observed = replace(contest, first_seen_at=checked_at, last_seen_at=checked_at)
