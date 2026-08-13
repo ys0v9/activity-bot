@@ -21,6 +21,7 @@ SOURCE = "contestkorea"
 BASE_URL = "https://www.contestkorea.com"
 LIST_PATH = "/sub/list.php"
 ALLOWED_STATUSES = frozenset({"접수중", "접수예정"})
+LIST_DISPLAY_ROWS = 100
 DATE_PATTERN = re.compile(r"(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})")
 SPACE_PATTERN = re.compile(r"\s+")
 
@@ -182,7 +183,7 @@ class ContestKoreaCrawler:
         if page < 1:
             raise ValueError("page must be positive")
         params = {
-            "displayrow": "12",
+            "displayrow": str(LIST_DISPLAY_ROWS),
             "int_gbn": "1",
             "Txt_sGn": "1",
             "Txt_key": "all",
