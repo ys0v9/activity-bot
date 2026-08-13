@@ -13,11 +13,18 @@ from src.domain.contest import Contest
 class FakeTable:
     def __init__(self, key_name: str) -> None:
         self.key_name = key_name
+        self.name = key_name
         self.items: dict[str, dict[str, Any]] = {}
+        self.meta = SimpleNamespace(client=self)
 
     def get_item(self, *, Key: dict[str, str], **_: Any) -> dict[str, Any]:
         item = self.items.get(Key[self.key_name])
         return {"Item": deepcopy(item)} if item else {}
+
+    def batch_get_item(self, *, RequestItems: dict[str, Any]) -> dict[str, Any]:
+        request = RequestItems[self.name]
+        items = [self.items[key[self.key_name]] for key in request["Keys"] if key[self.key_name] in self.items]
+        return {"Responses": {self.name: deepcopy(items)}, "UnprocessedKeys": {}}
 
     def put_item(self, *, Item: dict[str, Any], **_: Any) -> dict[str, Any]:
         self.items[Item[self.key_name]] = deepcopy(Item)
@@ -149,3 +156,5 @@ def test_worker_records_list_classification_and_detail_skip_metrics(monkeypatch)
     assert captured["new_contest_count"] == 1
     assert isinstance(captured["dynamodb_lookup_duration_ms"], int)
     assert isinstance(captured["dynamodb_write_duration_ms"], int)
+    assert captured["dynamodb_batch_get_request_count"] == 1
+    assert captured["dynamodb_unprocessed_key_retry_count"] == 0

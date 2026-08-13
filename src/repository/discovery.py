@@ -55,14 +55,9 @@ class ContestDiscovery:
         """Check list-level IDs before deciding whether their details are needed."""
         state = self.states.get(discord_user_id)
         deduplicated_ids = tuple(dict.fromkeys(contest_ids))
-        known_contest_ids: list[str] = []
-        new_contest_ids: list[str] = []
-
-        for contest_id in deduplicated_ids:
-            if self.contests.get(contest_id) is None:
-                new_contest_ids.append(contest_id)
-            else:
-                known_contest_ids.append(contest_id)
+        existing_ids = self.contests.get_existing_ids(deduplicated_ids)
+        known_contest_ids = [contest_id for contest_id in deduplicated_ids if contest_id in existing_ids]
+        new_contest_ids = [contest_id for contest_id in deduplicated_ids if contest_id not in existing_ids]
 
         return CandidateClassification(
             is_first_check=state is None or not state.initialized,
