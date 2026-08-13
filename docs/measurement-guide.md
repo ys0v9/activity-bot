@@ -44,6 +44,20 @@ ContestKorea 공개 목록에서 확인한 `displayrow=100`을 사용한다. 이
 
 공고 수와 상태는 실행 시점마다 달라질 수 있으므로, 서로 다른 실행의 절대 시간만으로 성능을 단정하지 않는다. `list_candidate_count`가 비슷한 실행끼리 `list_request_count`, `list_page_count`, `list_fetch_duration_ms`를 비교한다. `scripts/smoke_crawl.py`의 출력에도 위 목록 요청 수·페이지 수·목록 수집 시간이 포함된다.
 
+## 제한 병렬 목록 수집 측정
+
+목록 페이지는 최대 5개씩 동시에 요청하고, 응답 완료 순서와 무관하게 페이지 번호 오름차순으로 상태 필터·중복 제거·종료 판단을 수행한다. 즉 이 변경은 목록 요청을 숨기거나 줄이는 것이 아니라, 서로 독립적인 HTTP 대기 시간을 겹쳐 사용자 대기 시간을 줄이는 방식이다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `list_parallelism` | 한 묶음에 동시에 요청하는 목록 페이지의 최대 수. 현재 5 |
+| `list_fetch_duration_ms` | 병렬 묶음을 포함한 목록 수집의 실제 경과 시간. 사용자 대기 시간 비교에 사용 |
+| `list_request_duration_ms_total` | 각 목록 HTTP 요청 시간을 합한 값. 병렬 처리에서는 `list_fetch_duration_ms`보다 클 수 있음 |
+| `prefetched_list_page_count` | 빈 목록 또는 빈 대상 종료가 결정되기 전에 같은 병렬 묶음에서 이미 요청되어 후보 처리하지 않은 페이지 수 |
+| `list_request_count` | 실제 목록 HTTP 호출 수. prefetch된 페이지도 포함 |
+
+마지막 병렬 묶음은 종료 지점을 미리 알 수 없으므로 최대 `list_parallelism - 1`개의 페이지를 추가 요청할 수 있다. 이 값은 수집 누락을 피하기 위한 제한 병렬 처리의 특성이며, `prefetched_list_page_count`로 항상 확인한다.
+
 ## CloudWatch Metrics에서 확인할 항목
 
 AWS Console → **CloudWatch** → **Metrics** → **Lambda** → **By Function Name**에서 Worker Function을 선택한다.
@@ -159,6 +173,23 @@ fields @timestamp, @message
 | parse @message /list_candidate_count\\?": (?<list_candidate_count>\d+)/
 | display @timestamp, list_candidate_count, list_request_count,
           list_page_count, list_fetch_duration_ms
+| sort @timestamp desc
+| limit 50
+```
+
+병렬 목록 수집의 경과 시간·요청 시간 합계·추가 요청 페이지 확인:
+
+```sql
+fields @timestamp, @message
+| filter @message like /contest_worker_completed/
+| parse @message /list_parallelism\\?": (?<list_parallelism>\d+)/
+| parse @message /list_fetch_duration_ms\\?": (?<list_fetch_duration_ms>\d+)/
+| parse @message /list_request_duration_ms_total\\?": (?<list_request_duration_ms_total>\d+)/
+| parse @message /prefetched_list_page_count\\?": (?<prefetched_list_page_count>\d+)/
+| parse @message /list_request_count\\?": (?<list_request_count>\d+)/
+| display @timestamp, list_parallelism, list_request_count,
+          prefetched_list_page_count, list_fetch_duration_ms,
+          list_request_duration_ms_total
 | sort @timestamp desc
 | limit 50
 ```

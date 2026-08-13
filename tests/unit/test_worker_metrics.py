@@ -76,7 +76,10 @@ class FakeCrawler:
         self.metrics = SimpleNamespace(
             list_page_count=2,
             list_fetch_duration_ms=7,
+            list_request_duration_ms_total=7,
             detail_fetch_duration_ms=0,
+            list_parallelism=5,
+            prefetched_list_page_count=0,
             crawler_error_count=0,
         )
         self.items = [
@@ -145,6 +148,9 @@ def test_worker_records_list_classification_and_detail_skip_metrics(monkeypatch)
 
     assert captured["event"] == "contest_worker_completed"
     assert captured["list_page_count"] == 2
+    assert captured["list_parallelism"] == 5
+    assert captured["prefetched_list_page_count"] == 0
+    assert captured["list_request_duration_ms_total"] == 7
     assert captured["list_candidate_count"] == 3
     assert captured["known_contest_count"] == 2
     assert captured["new_candidate_count"] == 1
