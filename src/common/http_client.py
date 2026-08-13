@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from threading import Lock
 
 import httpx
 
@@ -22,6 +23,7 @@ class HttpClient:
 
     def __init__(self, timeout_seconds: float = 15.0, user_agent: str = DEFAULT_USER_AGENT) -> None:
         self.metrics = HttpMetrics()
+        self._metrics_lock = Lock()
         self._client = httpx.Client(
             timeout=httpx.Timeout(timeout_seconds),
             follow_redirects=True,
@@ -30,13 +32,14 @@ class HttpClient:
 
     def get(self, url: str, *, request_type: str) -> httpx.Response:
         """Perform one GET request and record it before validation."""
-        self.metrics.request_count += 1
-        if request_type == "list":
-            self.metrics.list_request_count += 1
-        elif request_type == "detail":
-            self.metrics.detail_request_count += 1
-        else:
+        if request_type not in {"list", "detail"}:
             raise ValueError(f"Unsupported request_type: {request_type}")
+        with self._metrics_lock:
+            self.metrics.request_count += 1
+            if request_type == "list":
+                self.metrics.list_request_count += 1
+            else:
+                self.metrics.detail_request_count += 1
 
         response = self._client.get(url)
         response.raise_for_status()

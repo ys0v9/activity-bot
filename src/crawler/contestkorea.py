@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
+from threading import Lock
 from typing import Iterable
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 
@@ -22,6 +24,7 @@ BASE_URL = "https://www.contestkorea.com"
 LIST_PATH = "/sub/list.php"
 ALLOWED_STATUSES = frozenset({"접수중", "접수예정"})
 LIST_DISPLAY_ROWS = 100
+LIST_FETCH_PARALLELISM = 5
 MAX_CONSECUTIVE_EMPTY_TARGET_ITEMS = 36
 DATE_PATTERN = re.compile(r"(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})")
 SPACE_PATTERN = re.compile(r"\s+")
@@ -50,7 +53,10 @@ class ContestKoreaListItem:
 class CrawlMetrics:
     list_page_count: int = 0
     list_fetch_duration_ms: int = 0
+    list_request_duration_ms_total: int = 0
     detail_fetch_duration_ms: int = 0
+    list_parallelism: int = 1
+    prefetched_list_page_count: int = 0
     crawler_error_count: int = 0
 
 
@@ -100,7 +106,7 @@ def canonical_detail_url(detail_url: str) -> str:
 
 
 class ContestKoreaCrawler:
-    """Sequential public-page crawler for current ContestKorea contests."""
+    """Bounded-parallel public-page crawler for current ContestKorea contests."""
 
     def __init__(
         self,
@@ -108,11 +114,16 @@ class ContestKoreaCrawler:
         *,
         max_pages: int = 100,
         max_consecutive_empty_target_items: int = MAX_CONSECUTIVE_EMPTY_TARGET_ITEMS,
+        list_fetch_parallelism: int = LIST_FETCH_PARALLELISM,
     ) -> None:
+        if list_fetch_parallelism < 1:
+            raise ValueError("list_fetch_parallelism must be positive")
         self.http_client = http_client or HttpClient()
         self.max_pages = max_pages
         self.max_consecutive_empty_target_items = max_consecutive_empty_target_items
-        self.metrics = CrawlMetrics()
+        self.list_fetch_parallelism = list_fetch_parallelism
+        self.metrics = CrawlMetrics(list_parallelism=list_fetch_parallelism)
+        self._metrics_lock = Lock()
 
     @property
     def http_metrics(self) -> HttpMetrics:
@@ -128,44 +139,67 @@ class ContestKoreaCrawler:
 
     def fetch_list_items(self) -> list[ContestKoreaListItem]:
         """Fetch and deduplicate current target items without loading details."""
-        candidates: list[ContestKoreaListItem] = []
-        empty_target_items = 0
+        started = time.perf_counter()
+        try:
+            candidates: list[ContestKoreaListItem] = []
+            empty_target_items = 0
 
-        for page in range(1, self.max_pages + 1):
-            try:
-                list_items = self._fetch_list_page(page)
-            except (HTTPError, ValueError) as exc:
-                self.metrics.crawler_error_count += 1
-                raise ContestKoreaCrawlError(f"Failed to fetch ContestKorea list page {page}") from exc
+            for first_page in range(1, self.max_pages + 1, self.list_fetch_parallelism):
+                pages = tuple(range(first_page, min(first_page + self.list_fetch_parallelism, self.max_pages + 1)))
+                try:
+                    page_results = self._fetch_list_page_batch(pages)
+                except (HTTPError, ValueError) as exc:
+                    with self._metrics_lock:
+                        self.metrics.crawler_error_count += 1
+                    raise ContestKoreaCrawlError(f"Failed to fetch ContestKorea list pages {pages}") from exc
 
-            if not list_items:
+                for result_index, (_page, list_items) in enumerate(page_results):
+                    if not list_items:
+                        self.metrics.prefetched_list_page_count += len(page_results) - result_index - 1
+                        break
+                    target_items = [item for item in list_items if item.status in ALLOWED_STATUSES]
+                    if target_items:
+                        empty_target_items = 0
+                        candidates.extend(target_items)
+                    else:
+                        empty_target_items += len(list_items)
+                        if empty_target_items >= self.max_consecutive_empty_target_items:
+                            self.metrics.prefetched_list_page_count += len(page_results) - result_index - 1
+                            break
+                else:
+                    continue
                 break
-            target_items = [item for item in list_items if item.status in ALLOWED_STATUSES]
-            if target_items:
-                empty_target_items = 0
-                candidates.extend(target_items)
-            else:
-                empty_target_items += len(list_items)
-                if empty_target_items >= self.max_consecutive_empty_target_items:
-                    break
 
-        seen_ids: set[str] = set()
-        deduplicated: list[ContestKoreaListItem] = []
-        for item in candidates:
-            if item.contest_id in seen_ids:
-                continue
-            seen_ids.add(item.contest_id)
-            deduplicated.append(item)
-        return deduplicated
+            seen_ids: set[str] = set()
+            deduplicated: list[ContestKoreaListItem] = []
+            for item in candidates:
+                if item.contest_id in seen_ids:
+                    continue
+                seen_ids.add(item.contest_id)
+                deduplicated.append(item)
+            return deduplicated
+        finally:
+            with self._metrics_lock:
+                self.metrics.list_fetch_duration_ms = int((time.perf_counter() - started) * 1000)
 
     def _fetch_list_page(self, page: int) -> list[ContestKoreaListItem]:
         started = time.perf_counter()
-        self.metrics.list_page_count += 1
+        with self._metrics_lock:
+            self.metrics.list_page_count += 1
         try:
             response = self.http_client.get(self.list_url(page), request_type="list")
             return self.parse_list_html(response.text)
         finally:
-            self.metrics.list_fetch_duration_ms += int((time.perf_counter() - started) * 1000)
+            with self._metrics_lock:
+                self.metrics.list_request_duration_ms_total += int((time.perf_counter() - started) * 1000)
+
+    def _fetch_list_page_batch(self, pages: tuple[int, ...]) -> list[tuple[int, list[ContestKoreaListItem]]]:
+        """Fetch a bounded page batch concurrently and return it in page order."""
+        if len(pages) == 1:
+            return [(pages[0], self._fetch_list_page(pages[0]))]
+        with ThreadPoolExecutor(max_workers=len(pages), thread_name_prefix="contest-list") as executor:
+            futures = {page: executor.submit(self._fetch_list_page, page) for page in pages}
+            return [(page, futures[page].result()) for page in pages]
 
     def fetch_detail(self, item: ContestKoreaListItem) -> Contest:
         """Fetch one public detail page for a candidate not known in DynamoDB."""
@@ -174,10 +208,12 @@ class ContestKoreaCrawler:
             response = self.http_client.get(item.detail_url, request_type="detail")
             return self.parse_detail_html(response.text, item)
         except (HTTPError, ValueError) as exc:
-            self.metrics.crawler_error_count += 1
+            with self._metrics_lock:
+                self.metrics.crawler_error_count += 1
             raise ContestKoreaCrawlError(f"Failed to fetch ContestKorea detail {item.contest_id}") from exc
         finally:
-            self.metrics.detail_fetch_duration_ms += int((time.perf_counter() - started) * 1000)
+            with self._metrics_lock:
+                self.metrics.detail_fetch_duration_ms += int((time.perf_counter() - started) * 1000)
 
     @staticmethod
     def list_url(page: int) -> str:
