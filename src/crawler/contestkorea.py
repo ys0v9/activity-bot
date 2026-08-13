@@ -21,6 +21,8 @@ SOURCE = "contestkorea"
 BASE_URL = "https://www.contestkorea.com"
 LIST_PATH = "/sub/list.php"
 ALLOWED_STATUSES = frozenset({"접수중", "접수예정"})
+LIST_DISPLAY_ROWS = 100
+MAX_CONSECUTIVE_EMPTY_TARGET_ITEMS = 36
 DATE_PATTERN = re.compile(r"(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})")
 SPACE_PATTERN = re.compile(r"\s+")
 
@@ -105,11 +107,11 @@ class ContestKoreaCrawler:
         http_client: HttpClient | None = None,
         *,
         max_pages: int = 100,
-        max_consecutive_empty_target_pages: int = 3,
+        max_consecutive_empty_target_items: int = MAX_CONSECUTIVE_EMPTY_TARGET_ITEMS,
     ) -> None:
         self.http_client = http_client or HttpClient()
         self.max_pages = max_pages
-        self.max_consecutive_empty_target_pages = max_consecutive_empty_target_pages
+        self.max_consecutive_empty_target_items = max_consecutive_empty_target_items
         self.metrics = CrawlMetrics()
 
     @property
@@ -127,7 +129,7 @@ class ContestKoreaCrawler:
     def fetch_list_items(self) -> list[ContestKoreaListItem]:
         """Fetch and deduplicate current target items without loading details."""
         candidates: list[ContestKoreaListItem] = []
-        empty_target_pages = 0
+        empty_target_items = 0
 
         for page in range(1, self.max_pages + 1):
             try:
@@ -140,11 +142,11 @@ class ContestKoreaCrawler:
                 break
             target_items = [item for item in list_items if item.status in ALLOWED_STATUSES]
             if target_items:
-                empty_target_pages = 0
+                empty_target_items = 0
                 candidates.extend(target_items)
             else:
-                empty_target_pages += 1
-                if empty_target_pages >= self.max_consecutive_empty_target_pages:
+                empty_target_items += len(list_items)
+                if empty_target_items >= self.max_consecutive_empty_target_items:
                     break
 
         seen_ids: set[str] = set()
@@ -182,7 +184,7 @@ class ContestKoreaCrawler:
         if page < 1:
             raise ValueError("page must be positive")
         params = {
-            "displayrow": "12",
+            "displayrow": str(LIST_DISPLAY_ROWS),
             "int_gbn": "1",
             "Txt_sGn": "1",
             "Txt_key": "all",
