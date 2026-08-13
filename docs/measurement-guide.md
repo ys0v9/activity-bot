@@ -31,6 +31,19 @@ Contest Table의 기존 공고 존재 여부는 후보 ID를 중복 제거한 �
 
 정상적으로 부분 응답이 없으면 후보 N개의 Contest 조회는 `ceil(N / 100)`회 BatchGetItem으로 처리된다. `UnprocessedKeys`가 반환되면 제한된 exponential backoff 재시도를 하고, 재시도 한도를 넘겨도 남은 키가 있으면 Worker는 오류로 종료한다.
 
+## 목록 페이지 크기 확장 측정
+
+ContestKorea 공개 목록에서 확인한 `displayrow=100`을 사용한다. 이 변경은 상태 필터, 정렬, 페이지네이션 탐색, `str_no` 기반 식별을 바꾸지 않고 **한 HTTP 응답에 포함되는 목록 수만** 늘린다. 따라서 비교할 때는 같은 수집 대상 범위에서 아래 값을 함께 본다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `list_request_count` | 실제 `HttpClient.get(..., request_type="list")` 호출 수 |
+| `list_page_count` | crawler가 실제로 탐색한 목록 페이지 수 |
+| `list_fetch_duration_ms` | 모든 목록 HTTP 요청과 HTML parsing에 걸린 실제 시간 |
+| `list_candidate_count` | 상태 필터와 중복 제거 후 후보 공고 수 |
+
+공고 수와 상태는 실행 시점마다 달라질 수 있으므로, 서로 다른 실행의 절대 시간만으로 성능을 단정하지 않는다. `list_candidate_count`가 비슷한 실행끼리 `list_request_count`, `list_page_count`, `list_fetch_duration_ms`를 비교한다. `scripts/smoke_crawl.py`의 출력에도 위 목록 요청 수·페이지 수·목록 수집 시간이 포함된다.
+
 ## CloudWatch Metrics에서 확인할 항목
 
 AWS Console → **CloudWatch** → **Metrics** → **Lambda** → **By Function Name**에서 Worker Function을 선택한다.
@@ -131,6 +144,21 @@ fields @timestamp, @message
 | parse @message /dynamodb_unprocessed_key_retry_count\\?": (?<dynamodb_unprocessed_key_retry_count>\d+)/
 | display @timestamp, list_candidate_count, dynamodb_batch_get_request_count,
           dynamodb_unprocessed_key_retry_count, dynamodb_lookup_duration_ms
+| sort @timestamp desc
+| limit 50
+```
+
+목록 페이지 요청 수와 목록 수집 시간 비교:
+
+```sql
+fields @timestamp, @message
+| filter @message like /contest_worker_completed/
+| parse @message /list_request_count\\?": (?<list_request_count>\d+)/
+| parse @message /list_page_count\\?": (?<list_page_count>\d+)/
+| parse @message /list_fetch_duration_ms\\?": (?<list_fetch_duration_ms>\d+)/
+| parse @message /list_candidate_count\\?": (?<list_candidate_count>\d+)/
+| display @timestamp, list_candidate_count, list_request_count,
+          list_page_count, list_fetch_duration_ms
 | sort @timestamp desc
 | limit 50
 ```
