@@ -82,7 +82,7 @@ def make_service() -> tuple[ContestDiscovery, FakeTable, FakeTable]:
 
 def list_items() -> list[ContestKoreaListItem]:
     client = FixtureHttpClient()
-    crawler = ContestKoreaCrawler(client, max_pages=2)
+    crawler = ContestKoreaCrawler(client, max_pages=2, list_fetch_parallelism=1)
     items = crawler.fetch_list_items()
     assert crawler.metrics.list_page_count == 2
     return [
