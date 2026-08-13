@@ -134,7 +134,7 @@ def test_initialization_fetches_every_new_list_candidate_detail() -> None:
     assert len(contest_table.items) == 3
 
 
-def test_repeat_with_no_new_contests_skips_all_detail_requests_and_updates_last_seen() -> None:
+def test_repeat_with_no_new_contests_skips_detail_and_contest_table_writes() -> None:
     service, contest_table, _ = make_service()
     items = list_items()
     process_list(service, items, FixtureHttpClient(), checked_at="2026-08-10T00:00:00+00:00")
@@ -147,7 +147,7 @@ def test_repeat_with_no_new_contests_skips_all_detail_requests_and_updates_last_
     assert len(classification.known_contest_ids) == 3  # skipped_detail_count invariant
     assert client.metrics.detail_request_count == 0
     assert result.new_contests == []
-    assert all(item["last_seen_at"] == CHECKED_AT for item in contest_table.items.values())
+    assert all(item["last_seen_at"] == "2026-08-10T00:00:00+00:00" for item in contest_table.items.values())
 
 
 def test_repeat_fetches_only_one_new_contest_detail() -> None:

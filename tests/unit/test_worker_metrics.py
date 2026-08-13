@@ -164,3 +164,4 @@ def test_worker_records_list_classification_and_detail_skip_metrics(monkeypatch)
     assert isinstance(captured["dynamodb_write_duration_ms"], int)
     assert captured["dynamodb_batch_get_request_count"] == 1
     assert captured["dynamodb_unprocessed_key_retry_count"] == 0
+    assert captured["dynamodb_write_count"] == 2
