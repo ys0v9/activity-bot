@@ -21,6 +21,8 @@ class Contest:
     status: str | None
     detail_url: str
     first_seen_at: str | None = None
+    # Existing records are not rewritten during later scans in this MVP.
+    # It is recorded with first_seen_at when the contest is first stored.
     last_seen_at: str | None = None
 
     def to_item(self) -> dict[str, Any]:

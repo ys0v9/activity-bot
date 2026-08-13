@@ -14,9 +14,21 @@ Worker Lambda는 실행마다 `event=contest_worker_completed`, `version=v1-cont
 | `new_candidate_count` | 상세 조회 대상으로 분류된 신규 후보 수 |
 | `skipped_detail_count` | 기존 공고라 상세 요청을 생략한 후보 수 |
 | `dynamodb_lookup_duration_ms` | State/Contest 존재 여부 확인에 실제 걸린 시간 |
-| `dynamodb_write_duration_ms` | last_seen 갱신·신규 저장·state 저장에 실제 걸린 시간 |
+| `dynamodb_write_duration_ms` | 신규 공고 저장과 사용자 State 갱신에 실제 걸린 시간 |
 
 정상적인 실행에서는 `list_candidate_count = known_contest_count + new_candidate_count`, `skipped_detail_count = known_contest_count`다. 최초 initialization은 모든 후보가 신규 후보가 될 수 있으므로 상세 요청이 발생한다. initialization 이후 신규가 없는 반복 조회에서는 `detail_request_count = 0`이어야 한다.
+
+## 기존 공고 쓰기 생략 측정
+
+현재 MVP는 사이트에서 사라진 공고를 알리거나 공고별 마지막 노출 시각을 분석하지 않는다. 따라서 Contest Table의 `last_seen_at`은 **최초 저장 시각에 `first_seen_at`과 함께 기록된 뒤 기존 공고에서 다시 갱신하지 않는다.** 사용자별 마지막 `/최신` 실행 시각은 State Table의 `last_checked_at`으로 계속 저장한다.
+
+| 실행 상태 | Contest Table 쓰기 | State Table 쓰기 | 기대 `dynamodb_write_count` |
+| --- | --- | --- | ---: |
+| 최초 baseline, 후보 N개 | 신규 N개 저장 | initialize 1회 | N + 1 |
+| 반복 실행, 신규 0개 | 없음 | `last_checked_at` 1회 | 1 |
+| 반복 실행, 신규 M개 | 신규 M개 저장 | `last_checked_at` 1회 | M + 1 |
+
+이 정책은 기존 공고 중복 알림 방지에는 영향을 주지 않는다. 다만 공고별 `last_seen_at`으로 “마지막으로 사이트 목록에서 확인한 시각”을 알 수 없으므로, 사라진 공고 추적은 현재 MVP 범위 밖이다.
 
 ## BatchGetItem 조회 측정
 
@@ -143,6 +155,20 @@ fields @timestamp, @message
 | display @timestamp, list_page_count, list_candidate_count,
           known_contest_count, new_candidate_count, skipped_detail_count,
           dynamodb_lookup_duration_ms, dynamodb_write_duration_ms
+| sort @timestamp desc
+| limit 50
+```
+
+반복 실행의 DynamoDB 쓰기 횟수와 쓰기 시간 비교:
+
+```sql
+fields @timestamp, @message
+| filter @message like /contest_worker_completed/
+| parse @message /new_contest_count\\?": (?<new_contest_count>\d+)/
+| parse @message /dynamodb_write_count\\?": (?<dynamodb_write_count>\d+)/
+| parse @message /dynamodb_write_duration_ms\\?": (?<dynamodb_write_duration_ms>\d+)/
+| display @timestamp, new_contest_count, dynamodb_write_count,
+          dynamodb_write_duration_ms
 | sort @timestamp desc
 | limit 50
 ```
