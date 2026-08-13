@@ -1,6 +1,8 @@
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from src.crawler.contestkorea import (
+    LIST_DISPLAY_ROWS,
     ContestKoreaCrawler,
     ContestKoreaListItem,
     canonical_detail_url,
@@ -22,6 +24,17 @@ def test_parse_contestkorea_list_html() -> None:
     assert items[0].organizer == "한국정보기술진흥원"
     assert items[0].detail_url.endswith("str_no=202608080001")
     assert items[0].contest_id == "contestkorea:202608080001"
+
+
+def test_list_url_uses_verified_page_size_and_preserves_contest_filter() -> None:
+    query = parse_qs(urlsplit(ContestKoreaCrawler.list_url(7)).query, keep_blank_values=True)
+
+    assert query["displayrow"] == [str(LIST_DISPLAY_ROWS)]
+    assert query["displayrow"] == ["100"]
+    assert query["page"] == ["7"]
+    assert query["int_gbn"] == ["1"]
+    assert query["Txt_sortkey"] == ["a.int_sort"]
+    assert query["Txt_sortword"] == ["desc"]
 
 
 def test_parse_contestkorea_detail_html() -> None:
